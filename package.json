@@ -25,8 +25,8 @@
     "skills": []
   },
   "scripts": {
-    "test": "node --test",
-    "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext src/index.ts src/types.ts src/remote/constants.ts src/serial/constants.ts"
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext --allowImportingTsExtensions src/index.ts src/types.ts src/remote/config.ts src/remote/ssh-route.ts src/remote/constants.ts src/serial/constants.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

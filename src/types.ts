@@ -43,3 +43,10 @@ export type SerialProfile = {
   prompts?: SerialPromptConfig;
   picocom?: { command?: string };
 };
+
+export type DevicesConfig = {
+  version: 1;
+  updatedAt?: string;
+  devices: RemoteDevice[];
+  profiles: SerialProfile[];
+};
