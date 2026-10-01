@@ -1,0 +1,42 @@
+{
+  "name": "@hollinlee/pi-devices",
+  "version": "0.1.0",
+  "description": "Unified device management extension for Pi coding agent - remote SSH devices and serial consoles",
+  "type": "module",
+  "keywords": ["pi-package", "pi", "coding-agent", "remote-devices", "serial-devices", "ssh", "serial-console", "device-management", "extension"],
+  "license": "MIT",
+  "author": "hollinlee",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hollinlee/pi-devices.git"
+  },
+  "files": ["src", "README.md", "LICENSE"],
+  "main": "./src/index.ts",
+  "types": "./src/types.ts",
+  "exports": {
+    ".": {
+      "types": "./src/types.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "pi": {
+    "extensions": ["./src/index.ts"],
+    "skills": []
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext src/index.ts src/types.ts src/remote/constants.ts src/serial/constants.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*",
+    "node-pty": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.99.2",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.2"
+  }
+}
