@@ -3,14 +3,28 @@
   "version": "0.1.0",
   "description": "Unified device management extension for Pi coding agent - remote SSH devices and serial consoles",
   "type": "module",
-  "keywords": ["pi-package", "pi", "coding-agent", "remote-devices", "serial-devices", "ssh", "serial-console", "device-management", "extension"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "remote-devices",
+    "serial-devices",
+    "ssh",
+    "serial-console",
+    "device-management",
+    "extension"
+  ],
   "license": "MIT",
   "author": "hollinlee",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hollinlee/pi-devices.git"
   },
-  "files": ["src", "README.md", "LICENSE"],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "main": "./src/index.ts",
   "types": "./src/types.ts",
   "exports": {
@@ -21,12 +35,14 @@
     }
   },
   "pi": {
-    "extensions": ["./src/index.ts"],
+    "extensions": [
+      "./src/index.ts"
+    ],
     "skills": []
   },
   "scripts": {
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext --allowImportingTsExtensions src/index.ts src/types.ts src/remote/config.ts src/remote/ssh-route.ts src/remote/constants.ts src/serial/constants.ts"
+    "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext --allowImportingTsExtensions src/index.ts src/types.ts src/remote/config.ts src/remote/ssh-route.ts src/remote/index.ts src/remote/constants.ts src/serial/constants.ts src/serial/profiles.ts src/serial/session.ts src/serial/index.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

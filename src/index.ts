@@ -1,5 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import remoteDevicesExtension from "./remote/index.ts";
+import serialDevicesExtension from "./serial/index.ts";
 
 export default function (pi: ExtensionAPI): void {
-  void pi;
+  remoteDevicesExtension(pi);
+  serialDevicesExtension(pi);
 }
