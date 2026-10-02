@@ -7,6 +7,7 @@ import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { readDevicesConfig, writeDevicesConfig, devicesConfigPath } from "./config.ts";
+import { serialExec, serialList, serialRead, serialResolve } from "../serial/index.ts";
 import type { DevicesConfig, RemoteDevice } from "../types.ts";
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
@@ -1362,7 +1363,7 @@ function summarizeRemoteToolCall(toolName: string, args: any): string {
 
 function renderRemoteToolCall(toolName: string, args: any, theme: Theme): Text {
   const title = theme.fg("toolTitle", theme.bold(toolName));
-  const summary = truncatePlainToWidth(summarizeRemoteToolCall(toolName, args), 120, "…");
+  const summary = truncatePlainToWidth(args?.type === "serial" ? `serial ${args.profile ?? "profiles"} ${args.command ?? ""}` : summarizeRemoteToolCall(toolName, args), 120, "…");
   return new Text(`${title} ${theme.fg("muted", summary)}`, 0, 0);
 }
 
@@ -1375,6 +1376,7 @@ function toolContentText(result: any): string {
 }
 
 function renderRemoteToolResult(result: any, options: any, theme: Theme, context: any): Text {
+  if (result?.details?.type === "serial") return new Text(toolContentText(result), 0, 0);
   // Use native Pi tool rendering
   return new Text("", 0, 0);
 }
@@ -1484,18 +1486,18 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "devices_list",
-    label: "Remote Devices: List",
-    description: "列出已配置的远程设备。用于查看有哪些 VPS、台式机、服务器可供远程管理。",
+    label: "Devices: List",
+    description: "List configured SSH devices (type=remote) or serial profiles (type=serial). Serial profiles never expose credentials.",
     promptSnippet: "列出已配置远程设备及别名/标签",
     promptGuidelines: ["Use devices_list when the user asks what remote machines/devices are available."],
-    parameters: Type.Object({
-      type: Type.Literal("remote"),
-      query: Type.Optional(Type.String({ description: "可选：按 id/name/alias/tag/host 模糊过滤" })),
-      tag: Type.Optional(Type.String({ description: "可选：按标签过滤" })),
-    }),
+    parameters: Type.Union([
+      Type.Object({ type: Type.Literal("remote"), query: Type.Optional(Type.String({ description: "可选：按 id/name/alias/tag/host 模糊过滤" })), tag: Type.Optional(Type.String({ description: "可选：按标签过滤" })) }),
+      Type.Object({ type: Type.Literal("serial") }),
+    ]),
     renderCall: (args: any, theme: Theme) => renderRemoteToolCall("devices_list", args, theme),
     renderResult: renderRemoteToolResult,
     async execute(_id, params: any): Promise<any> {
+      if (params.type === "serial") return serialList();
       const config = readConfig();
       let devices = config.devices;
       if (params.query) devices = devices.filter((d) => scoreDevice(d, params.query!) > 0);
@@ -1510,21 +1512,22 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "devices_resolve",
-    label: "Remote Devices: Resolve",
-    description: "根据自然语言名称、别名、标签或 IP 解析远程设备。",
+    label: "Devices: Resolve",
+    description: "Resolve an SSH device by query (type=remote) or a serial profile by explicit profile id (type=serial).",
     promptSnippet: "把用户说的设备名称/别名解析为设备 id",
     promptGuidelines: [
       "Use devices_resolve before remote operations when the user names a machine by alias, e.g. lab pc, build machine, server.",
       "Confident fuzzy matches are automatically saved as aliases so the same nickname resolves directly next time.",
       "If devices_resolve returns multiple close candidates or confidence < 0.7, ask the user to choose, then call devices_learn_alias with the user's original nickname and chosen device.",
     ],
-    parameters: Type.Object({
-      type: Type.Literal("remote"),
-      query: Type.String({ description: "用户说的设备名称、别名、标签或 IP" }),
-    }),
+    parameters: Type.Union([
+      Type.Object({ type: Type.Literal("remote"), query: Type.String({ description: "用户说的设备名称、别名、标签或 IP" }) }),
+      Type.Object({ type: Type.Literal("serial"), profile: Type.String() }),
+    ]),
     renderCall: (args: any, theme: Theme) => renderRemoteToolCall("devices_resolve", args, theme),
     renderResult: renderRemoteToolResult,
     async execute(_id, params: any): Promise<any> {
+      if (params.type === "serial") return serialResolve(params);
       const resolved = resolveDevice(params.query);
       const learnedAlias = learnResolvedAlias(params.query, resolved);
       const candidates = resolved.candidates.slice(0, 5).map((c) => ({ score: c.score, device: publicDevice(c.device) }));
@@ -1616,8 +1619,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "devices_exec",
-    label: "Remote Devices: Exec",
-    description: "通过 SSH 在指定远程设备上执行非交互命令。适用于查看状态、配置服务、远程诊断。",
+    label: "Devices: Exec",
+    description: "Execute a non-interactive command over SSH (type=remote, device) or a guarded serial PTY session (type=serial, profile). Serial login uses OS secure storage and requires shell confirmation.",
     promptSnippet: "通过 SSH 在已配置设备上执行命令",
     promptGuidelines: [
       "Use devices_read to read remote file contents instead of devices_exec cat; use devices_write when writing text content to a remote file; use devices_exec instead of raw ssh in bash when operating on a configured remote device.",
@@ -1627,19 +1630,14 @@ export default function (pi: ExtensionAPI) {
       "Do not inflate timeout_seconds to hide uncertainty; if runtime is unknown, choose a conservative budget and explain/retry with a larger timeout when needed.",
       "For destructive commands, only set allowDangerous=true after the user clearly authorized that exact destructive action.",
     ],
-    parameters: Type.Object({
-      type: Type.Literal("remote"),
-      device: Type.String({ description: "设备 id 或明确别名" }),
-      command: Type.String({ description: "要在远端执行的 shell 命令" }),
-      user: Type.Optional(Type.String({ description: "可选：覆盖默认登录用户" })),
-      cwd: Type.Optional(Type.String({ description: "可选：远端工作目录" })),
-      sudo: Type.Optional(Type.Boolean({ description: "是否用 sudo -n 执行" })),
-      timeout_seconds: Type.Optional(Type.Number({ description: "总执行超时秒数。调用前应按命令预期耗时估算；默认 60 只是兜底，不适合构建/测试/下载等长任务" })),
-      allowDangerous: Type.Optional(Type.Boolean({ description: "仅在用户明确授权破坏性操作时设为 true" })),
-    }),
+    parameters: Type.Union([
+      Type.Object({ type: Type.Literal("remote"), device: Type.String({ description: "设备 id 或明确别名" }), command: Type.String({ description: "要在远端执行的 shell 命令" }), user: Type.Optional(Type.String({ description: "可选：覆盖默认登录用户" })), cwd: Type.Optional(Type.String({ description: "可选：远端工作目录" })), sudo: Type.Optional(Type.Boolean({ description: "是否用 sudo -n 执行" })), timeout_seconds: Type.Optional(Type.Number({ description: "总执行超时秒数。调用前应按命令预期耗时估算；默认 60 只是兜底，不适合构建/测试/下载等长任务" })), allowDangerous: Type.Optional(Type.Boolean({ description: "仅在用户明确授权破坏性操作时设为 true" })) }),
+      Type.Object({ type: Type.Literal("serial"), profile: Type.String(), command: Type.String(), timeout_seconds: Type.Optional(Type.Number()), allowDangerous: Type.Optional(Type.Boolean()) }),
+    ]),
     renderCall: (args: any, theme: Theme) => renderRemoteToolCall("devices_exec", args, theme),
     renderResult: renderRemoteToolResult,
     async execute(toolCallId, params: any, signal, _onUpdate, _ctx: ExtensionContext): Promise<any> {
+      if (params.type === "serial") return serialExec(params, signal);
       const device = getDevice(params.device);
       const reason = dangerousReason(params.command);
       if (reason && !params.allowDangerous) {
@@ -1679,8 +1677,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "devices_read",
-    label: "Remote Devices: Read",
-    description: `Read the contents of a remote file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to ${REMOTE_READ_MAX_LINES} lines or ${REMOTE_READ_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files.`,
+    label: "Devices: Read",
+    description: `Read a remote file (type=remote, device, path) or the bounded serial console buffer (type=serial, profile, optional lines). Serial reads do not log in and show only state before shell confirmation. Remote text supports offset/limit up to ${REMOTE_READ_MAX_LINES} lines or ${REMOTE_READ_MAX_BYTES / 1024}KB; remote images are returned as attachments.`,
     promptSnippet: "读取远端文件内容，支持文本和图片",
     promptGuidelines: [
       "Use devices_read to read remote file contents instead of devices_exec cat.",
@@ -1688,21 +1686,15 @@ export default function (pi: ExtensionAPI) {
       "For text files, output is truncated and includes continuation hints.",
       "For images (jpg, png, gif, webp, bmp), the image is returned as an attachment.",
     ],
-    parameters: Type.Object({
-      type: Type.Literal("remote"),
-      device: Type.String({ description: "设备 id 或明确别名" }),
-      path: Type.String({ description: "远端文件路径" }),
-      offset: Type.Optional(Type.Number({ description: "起始行号（1-indexed）" })),
-      limit: Type.Optional(Type.Number({ description: "最大读取行数" })),
-      user: Type.Optional(Type.String({ description: "可选：覆盖默认登录用户" })),
-      sudo: Type.Optional(Type.Boolean({ description: "是否用 sudo -n 读取" })),
-      timeout_seconds: Type.Optional(Type.Number({ description: "总执行超时秒数；默认 60" })),
-    }),
+    parameters: Type.Union([
+      Type.Object({ type: Type.Literal("remote"), device: Type.String({ description: "设备 id 或明确别名" }), path: Type.String({ description: "远端文件路径" }), offset: Type.Optional(Type.Number({ description: "起始行号（1-indexed）" })), limit: Type.Optional(Type.Number({ description: "最大读取行数" })), user: Type.Optional(Type.String({ description: "可选：覆盖默认登录用户" })), sudo: Type.Optional(Type.Boolean({ description: "是否用 sudo -n 读取" })), timeout_seconds: Type.Optional(Type.Number({ description: "总执行超时秒数；默认 60" })) }),
+      Type.Object({ type: Type.Literal("serial"), profile: Type.String(), lines: Type.Optional(Type.Number()) }),
+    ]),
     renderCall: (args: any, theme: Theme) => renderRemoteToolCall("devices_read", args, theme),
     renderResult: renderRemoteToolResult,
     async execute(toolCallId, params: any, signal, _onUpdate, _ctx: ExtensionContext): Promise<any> {
+      if (params.type === "serial") return serialRead(params);
       const device = getDevice(params.device);
-      const user = params.user || device.defaultUser;
       const sudo = Boolean(params.sudo);
       const timeoutSeconds = params.timeout_seconds ?? 60;
       const offset = Math.max(1, Math.floor(params.offset ?? 1));
@@ -1859,7 +1851,6 @@ export default function (pi: ExtensionAPI) {
       const continueOnError = params.continueOnError !== false;
       const totalOutputLimit = totalOutputLimitFromParams(params.total_max_output_bytes);
       const batchScript = buildRemoteBatchScript(commands, mode, continueOnError);
-      const user = params.user || device.defaultUser;
       const sudo = Boolean(params.sudo);
       const timeoutSeconds = params.timeout_seconds ?? 60;
       const outcome = await runSsh(device, {
@@ -1956,7 +1947,6 @@ export default function (pi: ExtensionAPI) {
     async execute(toolCallId, params: any, signal, _onUpdate, _ctx: ExtensionContext): Promise<any> {
       const device = getDevice(params.device);
       const command = "printf 'whoami='; whoami; printf 'hostname='; hostname; printf 'kernel='; uname -srmo; printf 'os='; (grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '\"' || true); printf 'uptime='; uptime";
-      const user = params.user || device.defaultUser;
       const timeoutSeconds = 25;
       const live: any = undefined;
       const outcome = await runSsh(device, {

@@ -41,7 +41,7 @@
     "skills": []
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext --allowImportingTsExtensions src/index.ts src/types.ts src/remote/config.ts src/remote/ssh-route.ts src/remote/index.ts src/remote/constants.ts src/serial/constants.ts src/serial/profiles.ts src/serial/session.ts src/serial/index.ts"
   },
   "peerDependencies": {
