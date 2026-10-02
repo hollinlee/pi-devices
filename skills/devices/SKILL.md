@@ -55,7 +55,7 @@ Every remote-only tool also requires `type: "remote"`. For example, use `devices
 }
 ```
 
-`devices_probe` de-duplicates entries by `host:port`, preferring an `ssh-config` route, then `root`, then the first remaining entry. Direct devices are checked via ping/TCP/SSH; `ssh-config` devices are checked through the configured OpenSSH alias.
+`devices_probe` de-duplicates entries by `host:port`, preferring an `ssh-config` route, then `root`, then the first remaining entry. All devices are checked directly by a non-interactive SSH login running `true`; ICMP, TCP preflight, and Tailscale ping are not used. `ssh-config` devices use the configured OpenSSH alias.
 
 When adding a device, collect a stable id, host/IP, default SSH user, port if not 22, and optional aliases/tags. If key login is unavailable, use temporary bootstrap credentials outside persistent config before installing public keys.
 

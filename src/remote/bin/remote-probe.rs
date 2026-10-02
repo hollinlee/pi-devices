@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, VecDeque};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
@@ -46,10 +45,6 @@ struct ProbeResult {
     ok: bool,
     route: String,
     endpoint: String,
-    ping_ms: Option<u128>,
-    ping_error: Option<String>,
-    tcp_ms: Option<u128>,
-    tcp_error: Option<String>,
     ssh_ms: Option<u128>,
     ssh_error: Option<String>,
 }
@@ -377,68 +372,6 @@ fn expand_home(value: &str) -> String {
     value.to_string()
 }
 
-fn parse_ping_latency_ms(output: &str) -> Option<u128> {
-    for line in output.lines() {
-        if let Some(pos) = line.find("time=") {
-            let rest = &line[pos + 5..];
-            let value = rest.split_whitespace().next()?;
-            let ms = value.parse::<f64>().ok()?;
-            return Some(ms.round() as u128);
-        }
-    }
-    None
-}
-
-fn ping_once(host: &str, timeout: Duration) -> Result<u128, String> {
-    let wait_secs = std::cmp::max(1, ((timeout.as_millis() + 999) / 1000) as u64);
-    let output = Command::new("ping")
-        .arg("-n")
-        .arg("-c")
-        .arg("1")
-        .arg("-W")
-        .arg(wait_secs.to_string())
-        .arg(host)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output();
-    match output {
-        Ok(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            parse_ping_latency_ms(&text).ok_or_else(|| "ping failed".to_string())
-        }
-        Ok(_) => Err("ping failed".to_string()),
-        Err(_) => Err("ping unavailable".to_string()),
-    }
-}
-
-fn tcp_check(host: &str, port: u16, timeout: Duration) -> Result<u128, String> {
-    let start = Instant::now();
-    let addrs: Vec<_> = (host, port)
-        .to_socket_addrs()
-        .map_err(|_| "DNS resolution failed".to_string())?
-        .collect();
-    if addrs.is_empty() {
-        return Err("DNS resolution failed".to_string());
-    }
-    let mut last = None;
-    for addr in addrs {
-        match TcpStream::connect_timeout(&addr, timeout) {
-            Ok(_) => return Ok(start.elapsed().as_millis()),
-            Err(e) => last = Some(e.to_string()),
-        }
-    }
-    Err(if let Some(e) = last {
-        let lower = e.to_lowercase();
-        if lower.contains("timed out") || lower.contains("timeout") {
-            format!("port {port} timeout")
-        } else {
-            format!("port {port} unreachable")
-        }
-    } else {
-        format!("port {port} unreachable")
-    })
-}
-
 fn route_target(device: &Device) -> Option<String> {
     let route = device.ssh_route.as_ref()?;
     if route.kind != "ssh-config" {
@@ -560,32 +493,9 @@ fn probe_device(index: usize, device: Device, options: &ProbeOptions) -> ProbeRe
         ok: false,
         route: route_label(&device),
         endpoint: endpoint_label(&device),
-        ping_ms: None,
-        ping_error: None,
-        tcp_ms: None,
-        tcp_error: None,
         ssh_ms: None,
         ssh_error: None,
     };
-
-    if route_target(&device).is_none() {
-        match ping_once(&result.host, options.timeout) {
-            Ok(ms) => result.ping_ms = Some(ms),
-            Err(e) if e == "ping unavailable" => result.ping_error = Some(e),
-            Err(e) => {
-                result.ping_error = Some(e);
-                return result;
-            }
-        }
-
-        match tcp_check(&result.host, result.port, options.timeout) {
-            Ok(ms) => result.tcp_ms = Some(ms),
-            Err(e) => {
-                result.tcp_error = Some(if e.starts_with("port ") { format!("SSH {e}") } else { e });
-                return result;
-            }
-        }
-    }
 
     match ssh_check(&device, options.ssh_timeout) {
         Ok(ms) => {
@@ -676,12 +586,7 @@ fn manageability_text(result: &ProbeResult) -> String {
     if result.ok {
         return metric_text(result.ssh_ms, result.ssh_error.as_ref());
     }
-    result.ping_error
-        .as_ref()
-        .or(result.tcp_error.as_ref())
-        .or(result.ssh_error.as_ref())
-        .cloned()
-        .unwrap_or_else(|| "unknown failure".to_string())
+    legacy_failure_message(result)
 }
 
 fn group_columns(group: &ProbeGroup) -> (String, String, String) {
@@ -743,10 +648,8 @@ fn print_results(mut results: Vec<ProbeResult>, color: bool) {
 }
 
 fn legacy_failure_message(result: &ProbeResult) -> String {
-    result.ping_error
+    result.ssh_error
         .as_ref()
-        .or(result.tcp_error.as_ref())
-        .or(result.ssh_error.as_ref())
         .cloned()
         .unwrap_or_else(|| "unknown failure".to_string())
 }
