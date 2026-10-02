@@ -22,6 +22,7 @@
   },
   "files": [
     "src",
+    "skills",
     "README.md",
     "LICENSE"
   ],
@@ -38,7 +39,9 @@
     "extensions": [
       "./src/index.ts"
     ],
-    "skills": []
+    "skills": [
+      "./skills"
+    ]
   },
   "scripts": {
     "test": "node --experimental-strip-types --test --test-concurrency=1 \"src/**/*.test.ts\"",
